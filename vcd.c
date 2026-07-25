@@ -15,7 +15,7 @@
 #define MAX_SCOPE 32  // how many char scopes[] to allocate
 #endif
 #ifndef MAX_CHANNEL
-#define MAX_CHANNEL 400  // how many Channel to allocate 96*96 = 8836
+#define MAX_CHANNEL 64  // how many Channel to allocate 96*96 = 8836
 #endif
 #define ITV_TIME 10                 // sample interval to display timestamp
 #define VALUES "0123456789zZxXbU-"  // allowed bus values/types
@@ -54,16 +54,78 @@ typedef struct {
   unsigned scope_lim, ch_lim, sz_lim;
 } ParseCtx;
 
+#define MAX_TOKEN_LENGTH 5
+#define SPACE_FOR_TOKENS(n) ((n) * MAX_TOKEN_LENGTH + 1)
+#define MAX_TOKEN_DICT_LENGTH SPACE_FOR_TOKENS(MAX_CHANNEL)
+#define TOKEN_SEPARATOR ' '
+
+char g_token_dict[MAX_TOKEN_DICT_LENGTH] = "";
+
+/* Lookup the token in the token dictionary token_dict.
+   If not found add the token to the dictionary.
+   Return the token's index 0..n-1 or
+     -1 if the token is too long.
+     -2 if the token dictionary is full.
+*/
+int lookup(char *token_dict, const char *token) {
+  int rc = -1;
+
+  if (strnlen(token, 2 * MAX_TOKEN_LENGTH) <= MAX_TOKEN_LENGTH) {
+    char tks[2]; tks[0] = TOKEN_SEPARATOR; tks[1] = '\0';
+
+    /* Token + two spaces + \0. */
+    char padded_token[MAX_TOKEN_LENGTH + 3] = "";
+    strcat(padded_token, tks);
+    strncat(padded_token, token, MAX_TOKEN_LENGTH);
+    strcat(padded_token, tks);
+
+    /* Initialize the token dictionary. */
+    if (! *token_dict) {
+      strcat(token_dict, tks);
+    }
+
+    printf("Lookup /%s/ in /%s/ ", padded_token, token_dict);
+
+    char *found_at = NULL;
+    char *td = token_dict;
+    if (found_at = strstr(token_dict, padded_token)) {
+      /* Count token separators until the found_at position. */
+      for (rc = 0; td != found_at; *td == *tks ? rc++ : 0, td++);
+    }
+    else {
+      rc = -2; /* Token dict is too short to append the token. */
+      size_t needed_len = strlen(token_dict) + strlen(padded_token) - 1;
+      if (needed_len <= MAX_TOKEN_DICT_LENGTH) {
+        /* Count all token separators - 1. */
+        for (rc = -1; *td; *td == *tks ? rc++ : 0, td++);
+        /* Append the padded token minus its leading space. */
+        strncat(token_dict, padded_token + 1, MAX_TOKEN_LENGTH + 1);
+      }
+    } 
+  }
+
+  printf("rc: %d\n", rc);
+  return rc;
+}
+
 /* convert a base-94 or 'c'+num chan id (!...~) to integer */
 size_t chanId(char* str_id, unsigned isStr) {
   size_t id = 0;
   if (isStr) {
     id = atoi(str_id + 1);
   } else {
+    int rc = lookup(g_token_dict, str_id);
+    if (rc < 0) {
+      die("Lookup failed with %d for id %s", rc, str_id);
+    }
+    else {
+      id = rc;
+    }
+  /*     
     for (size_t i = strlen(str_id); i >= 1; i--) {
       id = (id * 94) + str_id[i - 1] - '!';
     }
-  }
+  */  }
   if (id > MAX_CHANNEL) die(REBUILD(MAX_CHANNEL));
   return id;
 }
