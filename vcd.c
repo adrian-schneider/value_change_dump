@@ -4,9 +4,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define USAGE "USAGE: vcd < in.vcd > out.ascii :\n"
-#define PROLOG "Fatal error. Send the VCD on https://github.com/yne/vcd/issues"
+#define PROLOG "Fatal error. Can't continue."
 #define REBUILD(D) #D " reached (" VAL(D) "), rebuild with -D" #D "=...\n"
 #define die(...) exit(fprintf(stderr, PROLOG "\nReason: " __VA_ARGS__))
 
@@ -83,12 +84,13 @@ int lookup(char *token_dict, const char *token) {
     if (! *token_dict) {
       strcat(token_dict, tks);
     }
-
+    /*
     printf("Lookup /%s/ in /%s/ ", padded_token, token_dict);
+    */
 
     char *found_at = NULL;
     char *td = token_dict;
-    if (found_at = strstr(token_dict, padded_token)) {
+    if ((found_at = strstr(token_dict, padded_token))) {
       /* Count token separators until the found_at position. */
       for (rc = 0; td != found_at; *td == *tks ? rc++ : 0, td++);
     }
@@ -103,10 +105,67 @@ int lookup(char *token_dict, const char *token) {
       }
     } 
   }
-
+  /*
   printf("rc: %d\n", rc);
+  */
   return rc;
 }
+
+#define RANGE_SEPARATOR '-'
+
+int limit0Max(int x, int max) { return abs(x) % ((max) + 1); }
+
+/*
+*/
+int parseRange(const char *arg, int *rangeFrom, int *rangeTo, int rangeMax) {
+  *rangeFrom = 0;
+  *rangeTo = rangeMax;
+  char rangeSepar = RANGE_SEPARATOR;
+
+  int rc = sscanf(arg, "%d%c%d", rangeFrom, &rangeSepar, rangeTo);
+
+  if ((rc > 0) && (rangeSepar == RANGE_SEPARATOR)) {
+    if (*rangeFrom < 0) {
+      *rangeTo = limit0Max(*rangeFrom, rangeMax);
+      *rangeFrom = 0;
+    }
+    else {
+      *rangeFrom = limit0Max(*rangeFrom, rangeMax);
+      *rangeTo = (rc < 2) ? *rangeFrom : limit0Max(*rangeTo, rangeMax);
+    }
+    return 1;
+  }
+  return 0;
+}
+
+#define MAX_INTEN 8
+#define MAX_INTEN_LEN 32
+#define INTEN_OFF -1
+
+char g_intenOn[MAX_INTEN][MAX_INTEN_LEN];
+char g_intenOff[MAX_INTEN_LEN];
+int g_waveInten[MAX_CHANNEL];
+
+void intensifyWave(int rangeFrom, int rangeTo, int inten) {
+  for(int i = rangeFrom; i <= rangeTo; i++) { g_waveInten[i] = inten; }
+}
+
+void initInten(int fmtHtml) {
+  strcat(g_intenOn[0], fmtHtml ? "<span style=\"color: black\">"   : "\033[30m");
+  strcat(g_intenOn[1], fmtHtml ? "<span style=\"color: red\">"     : "\033[31m");
+  strcat(g_intenOn[2], fmtHtml ? "<span style=\"color: green\">"   : "\033[32m");
+  strcat(g_intenOn[3], fmtHtml ? "<span style=\"color: yellow\">"  : "\033[33m");
+  strcat(g_intenOn[4], fmtHtml ? "<span style=\"color: blue\">"    : "\033[34m");
+  strcat(g_intenOn[5], fmtHtml ? "<span style=\"color: magenta\">" : "\033[35m");
+  strcat(g_intenOn[6], fmtHtml ? "<span style=\"color: cyan\">"    : "\033[36m");
+  strcat(g_intenOn[7], fmtHtml ? "<span style=\"color: white\">"   : "\033[37m");
+  strcat(g_intenOff,   fmtHtml ? "</span>"                         : "\033[0m");
+  for(int i = 0; i < MAX_CHANNEL; i++) { g_waveInten[i] = -1; }
+  intensifyWave(0, MAX_CHANNEL - 1, INTEN_OFF);
+}
+
+char *intenOnChan(int chan) { return g_waveInten[chan] > INTEN_OFF ? g_intenOn[g_waveInten[chan]] : ""; }
+char *intenOffChan(int chan) { return g_waveInten[chan] > INTEN_OFF ? g_intenOff : ""; }
 
 /* convert a base-94 or 'c'+num chan id (!...~) to integer */
 size_t chanId(char* str_id, unsigned isStr) {
@@ -232,27 +291,33 @@ void parseVcd(ParseCtx* p) {
   }
 }
 
-void printYml(ParseCtx* p, PrintOpt* opt) {
+void printYml(ParseCtx* p, PrintOpt* opt, int fmtHtml) {
   if (unilen(opt->high) != 1) die("high waveform length must be 1");
   if (unilen(opt->low) != 1) die("low waveform length must be 1");
   if (unilen(opt->drown) > 1) die("drown waveform length must be 1 or empty");
   if (unilen(opt->raise) > 1) die("raise waveform length must be 1 or empty");
 
+  char leader[1024] = "<html><pre font-family: 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace; line-height: 1;>\n";
+  char trailer[1024] = "</pre></html>\n";
+  
+  if (fmtHtml) { printf("%s", leader); }
+
   int zoom = (p->sz_lim + 7) >> 2;  // how many char per sample (8bit => 2)
   int trans = *opt->drown && *opt->raise;
   printf("global:\n");
-  printf("  zoom: %i\n", zoom);
-  printf("  date: %s\n", p->date);
-  printf("  total: %i\n", p->total);
-  printf("  skip: %i\n", opt->skip);
+  printf("  zoom:    %i\n", zoom);
+  printf("  date:    %s\n", p->date);
+  printf("  total:   %i\n", p->total);
+  printf("  skip:    %i\n", opt->skip);
   printf("  time:\n");
   printf("    scale: %.2f\n", p->scale);
-  printf("    unit: %s\n", p->unit ?: "?");
+  printf("    unit:  %s\n", p->unit ?: "?");
   printf("    %-*s: %s", p->ch_lim, "line", opt->start);
   for (double smpl = opt->skip; smpl < p->total; smpl += ITV_TIME) {
     printf("%-*g ", ITV_TIME * zoom - 1, smpl * p->scale);
   }
   printf("%s\nchannels:\n", opt->end);
+  int chan = 0;
   for (Channel* ch = p->ch; ch - p->ch < (signed)COUNT(p->ch); ch++) {
     // skip empty ch
     if (!ch->size) continue;
@@ -262,6 +327,7 @@ void printYml(ParseCtx* p, PrintOpt* opt) {
     }
 
     printf("    %-*s: %s", p->ch_lim, ch->name, opt->start);
+    printf("%s", intenOnChan(chan));
     for (Sample* s = ch->samples + opt->skip; s < ch->samples + p->total; s++) {
       Sample* prev = s > ch->samples ? s - 1 : s;
       if (s->state) {  // state data: UUUUZZZZ-
@@ -278,18 +344,76 @@ void printYml(ParseCtx* p, PrintOpt* opt) {
         printf("%-*X", zoom, s->val);
       }
     }
+    printf("%s", intenOffChan(chan)); chan++;
     printf("%s\n", opt->end);
   }
+
+  if (fmtHtml) { printf("%s", trailer); }
 }
 
-int main() {
-  PrintOpt opt = {getenv("LOW") ?: "▁",       getenv("RAISE") ?: "╱",
-                  getenv("HIGH") ?: "▔",      getenv("DROWN") ?: "╲",
-                  getenv("STX") ?: "\"",      getenv("ETX") ?: "\"",
-                  atoi(getenv("SKIP") ?: "0")};
+void printUsage(char* progname) {
+  fprintf(stderr, "Usage: %s [options] [< infile]\n", progname);
+  fprintf(stderr, "       %s [options] [< infile] [> outfile]\n", progname);
+  fprintf(stderr, "       %s [options] [< infile] [| program]\n", progname);
+  fprintf(stderr, "  -7    Use only ASCII characters in the output.\n");
+  fprintf(stderr, "  -H    Output as html with font setting.\n");
+  fprintf(stderr, "  -h    Show this command usage.\n\n");
+  fprintf(stderr, "  Environment variables:\n");
+  fprintf(stderr, "  STX   Start prefix text.\n");
+  fprintf(stderr, "  ETX   End suffix text. Examples:\n");
+  fprintf(stderr, "        STX=$(printf \"\\x1b[32m\") ETX=$(printf \"\\x1b[0m\")\n");
+  fprintf(stderr, "          Print signals in green (ANSI) color.\n");
+  fprintf(stderr, "        RAISE=\"\" DROWN=\"\"\n");
+  fprintf(stderr, "          Disable RAISE/DROWN tranistion.\n");
+  fprintf(stderr, "  SKIP  Skip initial number of samples.\n");
+  fprintf(stderr, "  RAISE Signal raise character.\n");
+  fprintf(stderr, "  DROWN Signal drown character.\n");
+  fprintf(stderr, "  LOW   Signal low character. Not empty.\n");
+  fprintf(stderr, "  HIGH  Signal high character. Not empty.\n");
+  exit(EXIT_FAILURE);
+}
+
+int main(int argc, char* argv[]) {
+  int cmdopt;
+  int useAscii = 0;
+  int fmtHtml = 0;
+
+  int colr, rc;
+  char sepr;
+  char range[5];
+
+  while ((cmdopt = getopt(argc, argv, "7Hhc:")) != -1) {
+    switch (cmdopt) {
+      case '7': useAscii = 1; break;
+      case 'H': fmtHtml = 1; break;
+      case 'c':
+        rc = sscanf(optarg, "%d%c%4s", &colr, &sepr, range);
+        break;
+      case 'h':
+      default: printUsage(argv[0]);
+    }
+  }
+
+  initInten(fmtHtml);
+
+  PrintOpt opt;
+  opt = (PrintOpt) {
+    getenv("LOW") ?: "▁",       getenv("RAISE") ?: "╱",
+    getenv("HIGH") ?: "▔",      getenv("DROWN") ?: "╲",
+    getenv("STX") ?: "\"",      getenv("ETX") ?: "\"",
+    atoi(getenv("SKIP") ?: "0")
+  };
+  if (useAscii) {
+    opt = (PrintOpt) {
+      getenv("LOW") ?: "_",       getenv("RAISE") ?: "/",
+      getenv("HIGH") ?: "#",      getenv("DROWN") ?: "\\",
+      getenv("STX") ?: "\"",      getenv("ETX") ?: "\"",
+      atoi(getenv("SKIP") ?: "0")
+    };
+  }
   // PrintOpt opt = {"_", "/", "#", "\\"} {"▁", "╱", "▔", "╲"};
   ParseCtx ctx = {0};
   parseVcd(&ctx);
-  printYml(&ctx, &opt);
+  printYml(&ctx, &opt, fmtHtml);
   return 0;
 }
