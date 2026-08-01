@@ -16,7 +16,7 @@
 #define MAX_SCOPE 32  // how many char scopes[] to allocate
 #endif
 #ifndef MAX_CHANNEL
-#define MAX_CHANNEL 64  // how many Channel to allocate 96*96 = 8836
+#define MAX_CHANNEL 63  // how many Channels + 1 to allocate 96*96 = 8836
 #endif
 #define ITV_TIME 10                 // sample interval to display timestamp
 #define VALUES "0123456789zZxXbU-"  // allowed bus values/types
@@ -45,7 +45,7 @@ typedef struct {
 } Channel;
 
 typedef struct {
-  Channel ch[MAX_CHANNEL];  // [0] = timestamps
+  Channel ch[MAX_CHANNEL + 1];  // [0] = timestamps
   Token scopes[MAX_SCOPE];  // [0] = default
   unsigned total, scope_count, chan_str;
   float scale;                // duration of each sample
@@ -57,16 +57,21 @@ typedef struct {
 
 #define MAX_TOKEN_LENGTH 5
 #define SPACE_FOR_TOKENS(n) ((n) * MAX_TOKEN_LENGTH + 1)
-#define MAX_TOKEN_DICT_LENGTH SPACE_FOR_TOKENS(MAX_CHANNEL)
+#define MAX_TOKEN_DICT_LENGTH SPACE_FOR_TOKENS(MAX_CHANNEL + 1)
 #define TOKEN_SEPARATOR ' '
+
+int g_debug = 0;
+#define DBGERR if (g_debug) { fprintf(stderr,
+#define DBGEND ); } 
 
 char g_token_dict[MAX_TOKEN_DICT_LENGTH] = "";
 
-/* Lookup the token in the token dictionary token_dict.
-   If not found add the token to the dictionary.
-   Return the token's index 0..n-1 or
-     -1 if the token is too long.
-     -2 if the token dictionary is full.
+/* 
+Lookup the token in the token dictionary token_dict.
+If not found add the token to the dictionary.
+Return the token's index 0..n-1 or
+  -1 if the token is too long.
+  -2 if the token dictionary is full.
 */
 int lookup(char *token_dict, const char *token) {
   int rc = -1;
@@ -84,9 +89,7 @@ int lookup(char *token_dict, const char *token) {
     if (! *token_dict) {
       strcat(token_dict, tks);
     }
-    /*
-    printf("Lookup /%s/ in /%s/ ", padded_token, token_dict);
-    */
+    DBGERR "lookup - /%s/ in /%s/ ", padded_token, token_dict DBGEND
 
     char *found_at = NULL;
     char *td = token_dict;
@@ -105,17 +108,33 @@ int lookup(char *token_dict, const char *token) {
       }
     } 
   }
-  /*
-  printf("rc: %d\n", rc);
-  */
+  
+  DBGERR "rc: %d\n", rc DBGEND
+  
   return rc;
 }
+
+int queryWave(const char *argValue, int *rangeFrom, int *rangeTo) {
+  return 0;
+}
+
+#define MAX_INTEN 7
+#define MAX_INTEN_LEN 32
+#define INTEN_OFF -1
 
 #define RANGE_SEPARATOR '-'
 
 int limit0Max(int x, int max) { return abs(x) % ((max) + 1); }
 
 /*
+Parse a range and return true if successful.
+Valid arg strings and returned value for rangeFrom, rangeTo:
+  9*99  Value 9, 99.
+  -99   Value 0, 99.
+  9*    Value 9, rangeMax.
+  9     Value 9 for both.
+With * as the range separator. A '-' is a natural choice.
+Returned values are from 0 to n% (rangeMax + 1).
 */
 int parseRange(const char *arg, int *rangeFrom, int *rangeTo, int rangeMax) {
   *rangeFrom = 0;
@@ -138,13 +157,36 @@ int parseRange(const char *arg, int *rangeFrom, int *rangeTo, int rangeMax) {
   return 0;
 }
 
-#define MAX_INTEN 8
-#define MAX_INTEN_LEN 32
-#define INTEN_OFF -1
+#define ARG_VALUE_LEN 4
+#define ARG_SEPAR_RANGE '/'
+#define ARG_SEPAR_QUERY '?'
 
-char g_intenOn[MAX_INTEN][MAX_INTEN_LEN];
+int parseInten(const char *arg, int *rangeFrom, int *rangeTo, int *inten) {
+  *inten = -1;
+  char argSepar = ARG_SEPAR_RANGE;
+  char argValue[ARG_VALUE_LEN + 1] = "";
+
+  char fmt[16];
+  sprintf(fmt, "%%d%%c%%%ds", ARG_VALUE_LEN);
+  DBGERR "parseInten - fmt:%s\n", fmt DBGEND
+
+  int rc = sscanf(arg, fmt, inten, &argSepar, argValue);
+  *inten = limit0Max(*inten, MAX_INTEN);
+  DBGERR "parseInten - inten:%d separ:%c value:%s\n", *inten, argSepar, argValue DBGEND
+
+  if (rc > 0) {
+    if (argSepar == ARG_SEPAR_RANGE) {
+      return parseRange(argValue, rangeFrom, rangeTo, MAX_CHANNEL);
+    }
+    else if (argSepar == ARG_SEPAR_QUERY) {
+
+    }
+  }
+}
+
+char g_intenOn[MAX_INTEN + 1][MAX_INTEN_LEN];
 char g_intenOff[MAX_INTEN_LEN];
-int g_waveInten[MAX_CHANNEL];
+int g_waveInten[MAX_CHANNEL + 1];
 
 void intensifyWave(int rangeFrom, int rangeTo, int inten) {
   for(int i = rangeFrom; i <= rangeTo; i++) { g_waveInten[i] = inten; }
@@ -160,8 +202,6 @@ void initInten(int fmtHtml) {
   strcat(g_intenOn[6], fmtHtml ? "<span style=\"color: cyan\">"    : "\033[36m");
   strcat(g_intenOn[7], fmtHtml ? "<span style=\"color: white\">"   : "\033[37m");
   strcat(g_intenOff,   fmtHtml ? "</span>"                         : "\033[0m");
-  for(int i = 0; i < MAX_CHANNEL; i++) { g_waveInten[i] = -1; }
-  intensifyWave(0, MAX_CHANNEL - 1, INTEN_OFF);
 }
 
 char *intenOnChan(int chan) { return g_waveInten[chan] > INTEN_OFF ? g_intenOn[g_waveInten[chan]] : ""; }
@@ -297,8 +337,8 @@ void printYml(ParseCtx* p, PrintOpt* opt, int fmtHtml) {
   if (unilen(opt->drown) > 1) die("drown waveform length must be 1 or empty");
   if (unilen(opt->raise) > 1) die("raise waveform length must be 1 or empty");
 
-  char leader[1024] = "<html><pre font-family: 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace; line-height: 1;>\n";
-  char trailer[1024] = "</pre></html>\n";
+  char leader[1024] = "<html><body style=\"background-color:black;color:white\"><pre style=\"font-family:'Cascadia Mono','Menlo',monospace\">\n";
+  char trailer[1024] = "</pre></body></html>\n";
   
   if (fmtHtml) { printf("%s", leader); }
 
@@ -355,9 +395,11 @@ void printUsage(char* progname) {
   fprintf(stderr, "Usage: %s [options] [< infile]\n", progname);
   fprintf(stderr, "       %s [options] [< infile] [> outfile]\n", progname);
   fprintf(stderr, "       %s [options] [< infile] [| program]\n", progname);
-  fprintf(stderr, "  -7    Use only ASCII characters in the output.\n");
-  fprintf(stderr, "  -H    Output as html with font setting.\n");
-  fprintf(stderr, "  -h    Show this command usage.\n\n");
+  fprintf(stderr, "  -7        Use only ASCII characters in the output.\n");
+  fprintf(stderr, "  -H        Output as html with font setting.\n");
+  fprintf(stderr, "  -h        Show this command usage.\n");
+  fprintf(stderr, "  -i c/n-m  Intensify waves n to m with color c.\n");
+  fprintf(stderr, "  -i c?pat  Intensify wave named like pat with color c.\n\n");
   fprintf(stderr, "  Environment variables:\n");
   fprintf(stderr, "  STX   Start prefix text.\n");
   fprintf(stderr, "  ETX   End suffix text. Examples:\n");
@@ -378,17 +420,21 @@ int main(int argc, char* argv[]) {
   int useAscii = 0;
   int fmtHtml = 0;
 
-  int colr, rc;
-  char sepr;
-  char range[5];
+  intensifyWave(0, MAX_CHANNEL, INTEN_OFF);
 
-  while ((cmdopt = getopt(argc, argv, "7Hhc:")) != -1) {
+  while ((cmdopt = getopt(argc, argv, "7Hhc:i:dD")) != -1) {
+    int rangeFrom = -1, rangeTo = -1, inten = -1;
     switch (cmdopt) {
       case '7': useAscii = 1; break;
       case 'H': fmtHtml = 1; break;
-      case 'c':
-        rc = sscanf(optarg, "%d%c%4s", &colr, &sepr, range);
+      case 'i':
+        if (parseInten(optarg, &rangeFrom, &rangeTo, &inten)) {
+          DBGERR "  rangeFrom:%d rangeTo:%d inten:%d\n", rangeFrom, rangeTo, inten DBGEND
+          intensifyWave(rangeFrom, rangeTo, inten);
+        }
         break;
+      case 'd': g_debug = 1; break;
+      case 'D': g_debug = 0; break;
       case 'h':
       default: printUsage(argv[0]);
     }
