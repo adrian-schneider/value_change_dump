@@ -202,17 +202,25 @@ char g_htmlPrefix[1024];
 char g_htmlSuffix[1024];
 
 void initHtml(int invert) {
+  char *hivrt = getenv("HIVRT") ?: "style=\"background-color:black;color:white\"";
+  char *hfont = getenv("HFONT") ?: "style=\"font-family:'Cascadia Mono','Menlo',monospace;line-height:%s;\"";
+  char *hlinh = getenv("HLINH") ?: "1.2";
   strcat(g_htmlPrefix, "<html><body");
-  strcat(g_htmlPrefix, (invert ? " style=\"background-color:black;color:white\">\n" : ">\n"));
-  strcat(g_htmlPrefix, "<pre style=\"font-family:'Cascadia Mono','Menlo',monospace;");
-  strcat(g_htmlPrefix, "line-height:1.2;\">\n");
+  strcat(g_htmlPrefix, (invert ? " " : ""));
+  strcat(g_htmlPrefix, (invert ? hivrt : ""));
+  strcat(g_htmlPrefix, (">\n<pre "));
+  strcat(g_htmlPrefix, hfont);
+  strcat(g_htmlPrefix, ">\n");
   strcat(g_htmlSuffix, "</pre></body></html>\n");
 }
 
 char *intenOnChan(int chan) { return g_waveInten[chan] > INTEN_OFF ? g_intenOn[g_waveInten[chan]] : ""; }
 char *intenOffChan(int chan) { return g_waveInten[chan] > INTEN_OFF ? g_intenOff : ""; }
 
-/* convert a base-94 or 'c'+num chan id (!...~) to integer */
+/*
+convert a base-94 or 'c'+num chan id (!...~) to integer
+This has been replaced by a dynamic dictionary.
+*/
 size_t chanId(char* str_id, unsigned isStr) {
   size_t id = 0;
   if (isStr) {
