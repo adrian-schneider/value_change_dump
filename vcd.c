@@ -114,10 +114,6 @@ int lookup(char *token_dict, const char *token) {
   return rc;
 }
 
-int queryWave(const char *argValue, int *rangeFrom, int *rangeTo) {
-  return 0;
-}
-
 #define MAX_INTEN 7
 #define MAX_INTEN_LEN 32
 #define INTEN_OFF -1
@@ -159,7 +155,6 @@ int parseRange(const char *arg, int *rangeFrom, int *rangeTo, int rangeMax) {
 
 #define ARG_VALUE_LEN 4
 #define ARG_SEPAR_RANGE '/'
-#define ARG_SEPAR_QUERY '?'
 
 int parseInten(const char *arg, int *rangeFrom, int *rangeTo, int *inten) {
   *inten = -1;
@@ -178,10 +173,9 @@ int parseInten(const char *arg, int *rangeFrom, int *rangeTo, int *inten) {
     if (argSepar == ARG_SEPAR_RANGE) {
       return parseRange(argValue, rangeFrom, rangeTo, MAX_CHANNEL);
     }
-    else if (argSepar == ARG_SEPAR_QUERY) {
-
-    }
   }
+
+  return 0;
 }
 
 char g_intenOn[MAX_INTEN + 1][MAX_INTEN_LEN];
@@ -202,6 +196,17 @@ void initInten(int fmtHtml) {
   strcat(g_intenOn[6], fmtHtml ? "<span style=\"color: cyan\">"    : "\033[36m");
   strcat(g_intenOn[7], fmtHtml ? "<span style=\"color: white\">"   : "\033[37m");
   strcat(g_intenOff,   fmtHtml ? "</span>"                         : "\033[0m");
+}
+
+char g_htmlPrefix[1024];
+char g_htmlSuffix[1024];
+
+void initHtml(int invert) {
+  strcat(g_htmlPrefix, "<html><body");
+  strcat(g_htmlPrefix, (invert ? " style=\"background-color:black;color:white\">\n" : ">\n"));
+  strcat(g_htmlPrefix, "<pre style=\"font-family:'Cascadia Mono','Menlo',monospace;");
+  strcat(g_htmlPrefix, "line-height:1.2;\">\n");
+  strcat(g_htmlSuffix, "</pre></body></html>\n");
 }
 
 char *intenOnChan(int chan) { return g_waveInten[chan] > INTEN_OFF ? g_intenOn[g_waveInten[chan]] : ""; }
@@ -337,10 +342,7 @@ void printYml(ParseCtx* p, PrintOpt* opt, int fmtHtml) {
   if (unilen(opt->drown) > 1) die("drown waveform length must be 1 or empty");
   if (unilen(opt->raise) > 1) die("raise waveform length must be 1 or empty");
 
-  char leader[1024] = "<html><body style=\"background-color:black;color:white\"><pre style=\"font-family:'Cascadia Mono','Menlo',monospace\">\n";
-  char trailer[1024] = "</pre></body></html>\n";
-  
-  if (fmtHtml) { printf("%s", leader); }
+  if (fmtHtml) { printf("%s", g_htmlPrefix); }
 
   int zoom = (p->sz_lim + 7) >> 2;  // how many char per sample (8bit => 2)
   int trans = *opt->drown && *opt->raise;
@@ -388,7 +390,7 @@ void printYml(ParseCtx* p, PrintOpt* opt, int fmtHtml) {
     printf("%s\n", opt->end);
   }
 
-  if (fmtHtml) { printf("%s", trailer); }
+  if (fmtHtml) { printf("%s", g_htmlSuffix); }
 }
 
 void printUsage(char* progname) {
@@ -399,7 +401,6 @@ void printUsage(char* progname) {
   fprintf(stderr, "  -H        Output as html with font setting.\n");
   fprintf(stderr, "  -h        Show this command usage.\n");
   fprintf(stderr, "  -i c/n-m  Intensify waves n to m with color c.\n");
-  fprintf(stderr, "  -i c?pat  Intensify wave named like pat with color c.\n\n");
   fprintf(stderr, "  Environment variables:\n");
   fprintf(stderr, "  STX   Start prefix text.\n");
   fprintf(stderr, "  ETX   End suffix text. Examples:\n");
@@ -419,10 +420,11 @@ int main(int argc, char* argv[]) {
   int cmdopt;
   int useAscii = 0;
   int fmtHtml = 0;
+  int invert = 0;
 
   intensifyWave(0, MAX_CHANNEL, INTEN_OFF);
 
-  while ((cmdopt = getopt(argc, argv, "7Hhc:i:dD")) != -1) {
+  while ((cmdopt = getopt(argc, argv, "7Hhc:i:IdD")) != -1) {
     int rangeFrom = -1, rangeTo = -1, inten = -1;
     switch (cmdopt) {
       case '7': useAscii = 1; break;
@@ -433,6 +435,7 @@ int main(int argc, char* argv[]) {
           intensifyWave(rangeFrom, rangeTo, inten);
         }
         break;
+      case 'I': invert = 1; break;
       case 'd': g_debug = 1; break;
       case 'D': g_debug = 0; break;
       case 'h':
@@ -441,6 +444,7 @@ int main(int argc, char* argv[]) {
   }
 
   initInten(fmtHtml);
+  initHtml(invert);
 
   PrintOpt opt;
   opt = (PrintOpt) {
